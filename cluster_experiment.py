@@ -372,7 +372,7 @@ def main():
 
     df_tag = load_tag_data()
     df_tag = preprocess_tag_data(df_tag)
-    #experiment_tag_std_hierarchical_clustering(df_tag)
+    experiment_tag_std_hierarchical_clustering(df_tag)
     experiment_tag_std_kmeans_clustering(df_tag)
     #experiment_tag_mm_hierarchical_clustering(df_tag)
 
