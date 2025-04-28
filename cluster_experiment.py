@@ -1,5 +1,5 @@
 import mlflow
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 from sklearn.metrics import davies_bouldin_score, silhouette_score, calinski_harabasz_score
@@ -9,6 +9,8 @@ import time
 import os
 
 mlflow.set_tracking_uri("http://10.251.21.10:5000")
+
+is_dev = False #os.environ["cluster_experiment"] == "dev"
 
 def load_data():
     print("Loading data...")
@@ -24,8 +26,8 @@ def load_tag_data():
 
 def preprocess_tag_data(df):
     print("Preprocessing tag data...")
-    df_tag = df.copy()
-
+    df_tag = df[df['year_month'].str.find('2025') > -1].copy()
+    
     return df_tag
 
 def has_ms(ts):
@@ -167,31 +169,31 @@ def experiment_hierarchical_clustering(df_vs_stations):
                     print("time: ", execution_time)
 
 def experiment_tag_std_hierarchical_clustering(df_tag):
-    mlflow.set_experiment("Local HC Gear Value Stream")
-    print("Local HC Gear Value Stream")
+    
+    if is_dev:
+        experiment_name = "Local HC Gear Value Stream"
+    else:
+        experiment_name = "HC Gear Value Stream"
+
+    mlflow.set_experiment(experiment_name)
+    print(experiment_name)
 
     year_month_list = df_tag['year_month'].unique().tolist()
 
-
-    params = {
-        "n_year_month": year_month_list,
-        "n_clusters": [2,3,4,5,6,7,8,9,10],
-        "linkage": ["ward", "complete", "average", "single"],
-        "metric": ["euclidean", "manhattan", "cosine"],
-    }
-
-    #params = {
-    #    "n_clusters": [2],
-    #    "n_year_month": ['2024-1']
-    #}
-
-
-    #params = {
-    #    "n_year_month": ['2024-1'],
-    #    "n_clusters": [2],
-    #    "linkage": ["ward", "complete", "average", "single"],
-    #    "metric": ["euclidean", "manhattan", "cosine"],
-    # }
+    if is_dev:
+        params = {
+            "n_year_month": ['2025-1'],
+            "n_clusters": [2],
+            "linkage": ["ward"], #, "complete", "average", "single"],
+            "metric": ["euclidean"] #, "manhattan", "cosine"],
+        }
+    else:
+        params = {
+            "n_year_month": year_month_list,
+            "n_clusters": [2,3,4,5,6,7,8,9,10],
+            "linkage": ["ward", "complete", "average", "single"],
+            "metric": ["euclidean", "manhattan", "cosine"],
+        }
 
     for year_month in params["n_year_month"]:
         for n_clusters in params["n_clusters"]:
@@ -244,26 +246,9 @@ def experiment_tag_std_hierarchical_clustering(df_tag):
                         except:
                             can_run = False
                         else:
-                            can_run = True
-
-                            mlflow.log_metric("davies_bouldin_score", davies_bouldin_score(df_vs_stations_sample_standardized, clusters))
-                            mlflow.log_metric("silhouette_score", silhouette_score(df_vs_stations_sample_standardized, clusters))
-                            mlflow.log_metric("calinski_harabasz_score", calinski_harabasz_score(df_vs_stations_sample_standardized, clusters))
-
-                            # Adicionando os clusters ao dataframe original
-                            cluster_tag = f"Cluster"
-                            df_vs_stations_sample[cluster_tag] = clusters
-
-                            file_path = f"./artifacts/df_vs_stations_sample_clustered_std_{n_clusters}_{year_month}_{linkage}_{metric}.csv"
-                            df_vs_stations_sample.to_csv(file_path, index=False)
-                        
-                            mlflow.log_artifact(file_path)
-                        
-                            mlflow.sklearn.log_model(hierarchical, 
-                                                    "hierarchical_clustering_model", 
-                                                    registered_model_name="ValueStreamClusteringMonthly")
                             
-                            os.remove(file_path)
+                            log_results(df_vs_stations_sample, df_vs_stations_sample_standardized, clusters, run_name, hierarchical, "hierarchical_clustering_model")
+
                         finally:
                             end_time = time.time()
                             execution_time = end_time - start_time
@@ -273,86 +258,112 @@ def experiment_tag_std_hierarchical_clustering(df_tag):
                             print("can_run: ", can_run)
                             print("time: ", execution_time)
                 
+def experiment_tag_std_kmeans_clustering(df_tag):
+    
+    if is_dev:
+        experiment_name = "Local GV Model"
+    else:
+        experiment_name = "GV Model"
 
-def experiment_tag_mm_hierarchical_clustering(df_tag):
-    mlflow.set_experiment("Local TagYMmm Gear Value Stream")
-    print("Local TagYMmm Gear Value Stream")
+    mlflow.set_experiment(experiment_name)
+    print(experiment_name)
 
     year_month_list = df_tag['year_month'].unique().tolist()
 
-
-    params = {
-        "n_clusters": [2,3,4,5,6,7,8,9,10],
-        "n_year_month": year_month_list
-    }
-
-    #params = {
-    #    "n_clusters": [2],
-    #    "n_year_month": ['2024-1']
-    #}
+    if is_dev:
+        params = {
+            "n_year_month": ['2025-1'],
+            "n_clusters": [2],
+            "algorithm": ["lloyd"]#, "elkan"],
+        }
+    else:
+        params = {
+            "n_year_month": year_month_list,
+            "n_clusters": [2,3,4,5,6,7,8,9,10],
+            "algorithm": ["lloyd", "elkan"],
+        }
 
     for year_month in params["n_year_month"]:
         for n_clusters in params["n_clusters"]:
-        
+            for algorithm in params["algorithm"]:
 
-            run_name = f"hc_mm_{n_clusters}_clusters_{year_month}"
-            print(run_name)
+
+                    run_name = f"kmeans_std_{n_clusters}_{year_month}_{algorithm}"
+                    print(run_name)
 
            
-            with mlflow.start_run(run_name=run_name) as run:
-                mlflow.log_param("model_type", "Hierarchical Clustering")
-                mlflow.log_param("n_clusters", n_clusters)
-                mlflow.log_param("year_month", year_month)
+                    with mlflow.start_run(run_name=run_name) as run:
+                        mlflow.log_param("model_type", "KMeans Clustering")
+                        mlflow.log_param("n_clusters", n_clusters)
+                        mlflow.log_param("year_month", year_month)
+                        mlflow.log_param("algorithm", algorithm)
 
-                 # Sample the dataframe  
-                df_vs_stations_sample = df_tag[df_tag['year_month'] == year_month]\
-                                                    .drop(columns=['year_month'])\
-                                                    .copy()
-                
-                mlflow.log_param("n_rows", df_vs_stations_sample.shape[0])
-                
-                # Standardize the dataframe
-                scaler = MinMaxScaler()
-                df_vs_stations_sample_standardized = pd.DataFrame(
-                                            scaler.fit_transform(df_vs_stations_sample)
-                                            , columns=df_vs_stations_sample.columns)
+                        # Sample the dataframe  
+                        df_vs_stations_sample = df_tag[df_tag['year_month'] == year_month]\
+                                                            .drop(columns=['year_month'])\
+                                                            .copy()
+                        
+                        mlflow.log_param("n_rows", df_vs_stations_sample.shape[0])
+                        
+                        # Standardize the dataframe
+                        scaler = StandardScaler()
+                        df_vs_stations_sample_standardized = pd.DataFrame(
+                                                    scaler.fit_transform(df_vs_stations_sample)
+                                                    , columns=df_vs_stations_sample.columns)
 
-                # Criando o modelo de clustering hierárquico
-                hierarchical = AgglomerativeClustering(n_clusters=n_clusters)
+                        
 
-                # Ajustando o modelo aos dados
-                can_run = True
+                        # Ajustando o modelo aos dados
+                        can_run = True
 
-                start_time = time.time()
-                try:
-                    clusters = hierarchical.fit_predict(df_vs_stations_sample_standardized)
-                except:
-                    can_run = False
-                else:
-                    can_run = True
+                        start_time = time.time()
+                        try:
+                            model = KMeans(n_clusters=n_clusters, algorithm=algorithm)
+                            model.fit(df_vs_stations_sample_standardized)
+                            clusters = model.labels_
+                        except:
+                            can_run = False
+                        else:
+                            
+                            log_results(df_vs_stations_sample, df_vs_stations_sample_standardized, clusters, run_name, model, "kmeans_clustering_model")
+                            
+                        finally:
+                            end_time = time.time()
+                            execution_time = end_time - start_time
+                            mlflow.log_param("execution_time",execution_time)
+                            mlflow.log_param("can_run", can_run)
+                            
+                            print("can_run: ", can_run)
+                            print("time: ", execution_time)
 
-                    # Adicionando os clusters ao dataframe original
-                    cluster_tag = f"Cluster_{n_clusters}"
-                    df_vs_stations_sample[cluster_tag] = clusters
+def log_results(df, df_standardized, clusters, run_name, model_to_register, model_to_register_name):
+    mlflow.log_metric("davies_bouldin_score", davies_bouldin_score(df_standardized, clusters))
+    mlflow.log_metric("silhouette_score", silhouette_score(df_standardized, clusters))
+    mlflow.log_metric("calinski_harabasz_score", calinski_harabasz_score(df_standardized, clusters))
 
-                    file_path = f"./artifacts/df_vs_stations_sample_clustered_mm_{n_clusters}_{year_month}.csv"
-                    df_vs_stations_sample.to_csv(file_path, index=False)
-                
-                    mlflow.log_artifact(file_path)
-                
-                    mlflow.sklearn.log_model(hierarchical, 
-                                            "hierarchical_clustering_model", 
-                                            registered_model_name="ValueStreamClusteringMonthly")
-                    
-                    os.remove(file_path)
-                finally:
-                    end_time = time.time()
-                    execution_time = end_time - start_time
-                    mlflow.log_param("execution_time",execution_time)
-                    mlflow.log_param("can_run", can_run)
-                    
-                    print("can_run: ", can_run)
-                    print("time: ", execution_time)
+    # Adicionando os clusters ao dataframe original
+    cluster_tag = f"Cluster"
+    df[cluster_tag] = clusters
+
+    file_path = f"./artifacts/df_{run_name}.csv"
+    df.to_csv(file_path, index=False)
+    mlflow.log_artifact(file_path)
+    os.remove(file_path)
+
+    df_cluster_size = df.groupby('Cluster', as_index=False).size()
+    mlflow.log_table(df_cluster_size, "cluster_size.json")
+
+    mlflow.log_metric("cluster_size_min", df_cluster_size['size'].min())
+    mlflow.log_metric("cluster_size_max", df_cluster_size['size'].max())
+    mlflow.log_metric("cluster_size_mean", df_cluster_size['size'].mean())
+    mlflow.log_metric("cluster_size_median", df_cluster_size['size'].median())
+    mlflow.log_metric("cluster_size_std", df_cluster_size['size'].std())
+                            
+    # Log the model 
+    mlflow.sklearn.log_model(model_to_register, 
+          model_to_register_name, 
+          registered_model_name="GearClustering")
+
 def main():
 
     #df_vs_stations = load_data()
@@ -361,7 +372,8 @@ def main():
 
     df_tag = load_tag_data()
     df_tag = preprocess_tag_data(df_tag)
-    experiment_tag_std_hierarchical_clustering(df_tag)
+    #experiment_tag_std_hierarchical_clustering(df_tag)
+    experiment_tag_std_kmeans_clustering(df_tag)
     #experiment_tag_mm_hierarchical_clustering(df_tag)
 
 if __name__ == "__main__":
