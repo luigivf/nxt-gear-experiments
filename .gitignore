@@ -1,1 +1,4 @@
 data/*
+venv/*
+venv
+set_env.py

@@ -2,6 +2,8 @@ import mlflow
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
+from sklearn.cluster import FeatureAgglomeration
+
 from sklearn.metrics import davies_bouldin_score, silhouette_score, calinski_harabasz_score
 
 import pandas as pd
@@ -10,7 +12,7 @@ import os
 
 mlflow.set_tracking_uri("http://10.251.21.10:5000")
 
-is_dev = True #os.environ["cluster_experiment"] == "dev"
+is_dev = False #os.environ["cluster_experiment"] == "dev"
 
 def load_data():
     print("Loading data...")
@@ -27,7 +29,7 @@ def load_tag_data():
 def preprocess_tag_data(df):
     print("Preprocessing tag data...")
     
-    df_tag = df[df['year_month'].str.find('2025') > -1].copy()
+    df_tag = df[df['year_month'].str.find('2025-3') > -1].copy()
 
     df_true_false = pd.DataFrame(df_tag.drop(columns=['year_month']) > 0)
     for col in df_true_false.columns:
@@ -99,7 +101,7 @@ def preprocess_data(df_vs):
 
     return df_vs_stations
 
-def experiment_tag_std_hierarchical_clustering(df_tag, experiment):
+def experiment_tag_std_hierarchical_clustering(df_tag, experiment, reduce_dimensionality=False):
     
     if is_dev:
         experiment_name = "Local " + experiment
@@ -133,6 +135,8 @@ def experiment_tag_std_hierarchical_clustering(df_tag, experiment):
         
 
                     run_name = f"hc_std_{n_clusters}_{year_month}_{linkage}_{metric}"
+                    if reduce_dimensionality:
+                        run_name = run_name + "_reduced"
                     print(run_name)
 
            
@@ -157,7 +161,11 @@ def experiment_tag_std_hierarchical_clustering(df_tag, experiment):
                                                     scaler.fit_transform(df_vs_stations_sample)
                                                     , columns=df_vs_stations_sample.columns)
 
-                        
+                        if reduce_dimensionality:
+                            feature_agg = FeatureAgglomeration(n_clusters=20)
+                            df_vs_stations_sample_standardized = feature_agg.fit_transform(df_vs_stations_sample_standardized)
+
+
 
                         # Ajustando o modelo aos dados
                         can_run = True
@@ -194,7 +202,7 @@ def experiment_tag_std_hierarchical_clustering(df_tag, experiment):
                             print("can_run: ", can_run)
                             print("time: ", execution_time)
                 
-def experiment_tag_std_kmeans_clustering(df_tag, experiment):
+def experiment_tag_std_kmeans_clustering(df_tag, experiment, reduce_dimensionality=False):
     
     if is_dev:
         experiment_name = "Local " + experiment
@@ -215,7 +223,7 @@ def experiment_tag_std_kmeans_clustering(df_tag, experiment):
     else:
         params = {
             "n_year_month": year_month_list,
-            "n_clusters": [2,3,4,5,6,7,8,9,10],
+            "n_clusters": [2,3,4,5],
             "algorithm": ["lloyd", "elkan"],
         }
 
@@ -225,6 +233,8 @@ def experiment_tag_std_kmeans_clustering(df_tag, experiment):
 
 
                     run_name = f"kmeans_std_{n_clusters}_{year_month}_{algorithm}"
+                    if reduce_dimensionality:
+                        run_name = run_name + "_reduced"
                     print(run_name)
 
            
@@ -246,6 +256,10 @@ def experiment_tag_std_kmeans_clustering(df_tag, experiment):
                         df_vs_stations_sample_standardized = pd.DataFrame(
                                                     scaler.fit_transform(df_vs_stations_sample)
                                                     , columns=df_vs_stations_sample.columns)
+
+                        if reduce_dimensionality:
+                            feature_agg = FeatureAgglomeration(n_clusters=20)
+                            df_vs_stations_sample_standardized = feature_agg.fit_transform(df_vs_stations_sample_standardized)
 
                         
 
@@ -312,11 +326,19 @@ def main():
     df_tag = load_tag_data()
     df_tag, df_true_false = preprocess_tag_data(df_tag)
 
-    experiment_tag_std_hierarchical_clustering(df_tag, "Gear Clustering - Cycle")
     experiment_tag_std_kmeans_clustering(df_tag, "Gear Clustering - Cycle")
-
-    experiment_tag_std_hierarchical_clustering(df_true_false, "Gear Clustering - True/False")
+    experiment_tag_std_hierarchical_clustering(df_tag, "Gear Clustering - Cycle")
+    
     experiment_tag_std_kmeans_clustering(df_true_false, "Gear Clustering - True/False")
+    experiment_tag_std_hierarchical_clustering(df_true_false, "Gear Clustering - True/False")
+    
+    experiment_tag_std_kmeans_clustering(df_tag, "Gear Clustering - Cycle", reduce_dimensionality=True)
+    experiment_tag_std_hierarchical_clustering(df_tag, "Gear Clustering - Cycle", reduce_dimensionality=True)
+    
+    experiment_tag_std_kmeans_clustering(df_true_false, "Gear Clustering - True/False", reduce_dimensionality=True)
+    experiment_tag_std_hierarchical_clustering(df_true_false, "Gear Clustering - True/False", reduce_dimensionality=True)
+    
+
 
 if __name__ == "__main__":
     main()
