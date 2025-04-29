@@ -10,7 +10,7 @@ import os
 
 mlflow.set_tracking_uri("http://10.251.21.10:5000")
 
-is_dev = False #os.environ["cluster_experiment"] == "dev"
+is_dev = True #os.environ["cluster_experiment"] == "dev"
 
 def load_data():
     print("Loading data...")
@@ -26,9 +26,16 @@ def load_tag_data():
 
 def preprocess_tag_data(df):
     print("Preprocessing tag data...")
-    df_tag = df[df['year_month'].str.find('2025') > -1].copy()
     
-    return df_tag
+    df_tag = df[df['year_month'].str.find('2025') > -1].copy()
+
+    df_true_false = pd.DataFrame(df_tag.drop(columns=['year_month']) > 0)
+    for col in df_true_false.columns:
+        df_true_false[col] = df_true_false[col].astype(int)
+
+    df_true_false['year_month'] = df_tag['year_month']
+
+    return df_tag, df_true_false
 
 def has_ms(ts):
     if "." in ts:
@@ -92,88 +99,12 @@ def preprocess_data(df_vs):
 
     return df_vs_stations
 
-def experiment_hierarchical_clustering(df_vs_stations):
-    mlflow.set_experiment("v3 Gear Value Stream - Cluster")
-    print("Experimenting hierarchical clustering...")
-
-    params = {
-        "n_clusters": [2,3,4,5,6,7,8,9,10],
-        "n_samples": [25000, 50000, 75000, 80000, 90000, 95000]
-    }
-    
-
-    #params = {
-    #    "n_clusters": [2,3],
-    #    "n_samples": [100000,120]
-    #}
-
-    for n_samples in params["n_samples"]:
-        for n_clusters in params["n_clusters"]:
-        
-
-            run_name = f"hc_{n_clusters}_clusters_{n_samples}_samples"
-            print(run_name)
-
-           
-            with mlflow.start_run(run_name=run_name) as run:
-                mlflow.log_param("model_type", "Hierarchical Clustering")
-                mlflow.log_param("n_clusters", n_clusters)
-                mlflow.log_param("n_samples", n_samples)
-
-                 # Sample the dataframe  
-                df_vs_stations_sample = df_vs_stations.sample(n_samples, random_state=42)
-                
-                # Standardize the dataframe
-                scaler = StandardScaler()
-                df_vs_stations_sample_standardized = pd.DataFrame(
-                                            scaler.fit_transform(df_vs_stations_sample)
-                                            , columns=df_vs_stations_sample.columns)
-
-                # Criando o modelo de clustering hierárquico
-                hierarchical = AgglomerativeClustering(n_clusters=n_clusters)
-
-                # Ajustando o modelo aos dados
-                can_run = True
-
-                start_time = time.time()
-                try:
-                    clusters = hierarchical.fit_predict(df_vs_stations_sample_standardized)
-                except:
-                    can_run = False
-                else:
-                    can_run = True
-
-                    # Adicionando os clusters ao dataframe original
-                    cluster_tag = f"Cluster_{n_clusters}"
-                    df_vs_stations_sample[cluster_tag] = clusters
-
-                    file_path = f"./artifacts/df_vs_stations_sample_clustered_{n_clusters}_{n_samples}.csv"
-                    df_vs_stations_sample.to_csv(file_path, index=True)
-                    os.remove(file_path)
-
-                    mlflow.log_artifact(file_path)
-                    
-
-                    mlflow.sklearn.log_model(hierarchical, 
-                                            "hierarchical_clustering_model", 
-                                            registered_model_name="ValueStreamClustering")
-                    
-                    os.remove(file_path)
-                finally:
-                    end_time = time.time()
-                    execution_time = end_time - start_time
-                    mlflow.log_param("execution_time",execution_time)
-                    mlflow.log_param("can_run", can_run)
-                    
-                    print("can_run: ", can_run)
-                    print("time: ", execution_time)
-
-def experiment_tag_std_hierarchical_clustering(df_tag):
+def experiment_tag_std_hierarchical_clustering(df_tag, experiment):
     
     if is_dev:
-        experiment_name = "Local HC Gear Value Stream"
+        experiment_name = "Local " + experiment
     else:
-        experiment_name = "HC Gear Value Stream"
+        experiment_name = experiment
 
     mlflow.set_experiment(experiment_name)
     print(experiment_name)
@@ -190,7 +121,7 @@ def experiment_tag_std_hierarchical_clustering(df_tag):
     else:
         params = {
             "n_year_month": year_month_list,
-            "n_clusters": [2,3,4,5,6,7,8,9,10],
+            "n_clusters": [2,3,4,5],#,6,7,8,9,10],
             "linkage": ["ward", "complete", "average", "single"],
             "metric": ["euclidean", "manhattan", "cosine"],
         }
@@ -246,8 +177,13 @@ def experiment_tag_std_hierarchical_clustering(df_tag):
                         except:
                             can_run = False
                         else:
-                            
-                            log_results(df_vs_stations_sample, df_vs_stations_sample_standardized, clusters, run_name, hierarchical, "hierarchical_clustering_model")
+                            log_results(df_vs_stations_sample, 
+                                        df_vs_stations_sample_standardized, 
+                                        clusters, 
+                                        run_name, 
+                                        hierarchical, 
+                                        "hierarchical_clustering_model",
+                                        experiment_name)
 
                         finally:
                             end_time = time.time()
@@ -258,12 +194,12 @@ def experiment_tag_std_hierarchical_clustering(df_tag):
                             print("can_run: ", can_run)
                             print("time: ", execution_time)
                 
-def experiment_tag_std_kmeans_clustering(df_tag):
+def experiment_tag_std_kmeans_clustering(df_tag, experiment):
     
     if is_dev:
-        experiment_name = "Local GV Model"
+        experiment_name = "Local " + experiment
     else:
-        experiment_name = "GV Model"
+        experiment_name = experiment
 
     mlflow.set_experiment(experiment_name)
     print(experiment_name)
@@ -325,7 +261,13 @@ def experiment_tag_std_kmeans_clustering(df_tag):
                             can_run = False
                         else:
                             
-                            log_results(df_vs_stations_sample, df_vs_stations_sample_standardized, clusters, run_name, model, "kmeans_clustering_model")
+                            log_results(df_vs_stations_sample, 
+                                        df_vs_stations_sample_standardized, 
+                                        clusters, 
+                                        run_name, 
+                                        model, 
+                                        "kmeans_clustering_model",
+                                        experiment_name)
                             
                         finally:
                             end_time = time.time()
@@ -336,7 +278,7 @@ def experiment_tag_std_kmeans_clustering(df_tag):
                             print("can_run: ", can_run)
                             print("time: ", execution_time)
 
-def log_results(df, df_standardized, clusters, run_name, model_to_register, model_to_register_name):
+def log_results(df, df_standardized, clusters, run_name, model_to_register, model_to_register_name,experiment_name):
     mlflow.log_metric("davies_bouldin_score", davies_bouldin_score(df_standardized, clusters))
     mlflow.log_metric("silhouette_score", silhouette_score(df_standardized, clusters))
     mlflow.log_metric("calinski_harabasz_score", calinski_harabasz_score(df_standardized, clusters))
@@ -362,19 +304,19 @@ def log_results(df, df_standardized, clusters, run_name, model_to_register, mode
     # Log the model 
     mlflow.sklearn.log_model(model_to_register, 
           model_to_register_name, 
-          registered_model_name="GearClustering")
+          registered_model_name=experiment_name.replace(" ", "_").replace("-", "_").replace("/", "_"))
 
 def main():
 
-    #df_vs_stations = load_data()
-    #df_vs_stations = preprocess_data(df_vs_stations)
-    #experiment_hierarchical_clustering(df_vs_stations)
-
+    
     df_tag = load_tag_data()
-    df_tag = preprocess_tag_data(df_tag)
-    experiment_tag_std_hierarchical_clustering(df_tag)
-    experiment_tag_std_kmeans_clustering(df_tag)
-    #experiment_tag_mm_hierarchical_clustering(df_tag)
+    df_tag, df_true_false = preprocess_tag_data(df_tag)
+
+    experiment_tag_std_hierarchical_clustering(df_tag, "Gear Clustering - Cycle")
+    experiment_tag_std_kmeans_clustering(df_tag, "Gear Clustering - Cycle")
+
+    experiment_tag_std_hierarchical_clustering(df_true_false, "Gear Clustering - True/False")
+    experiment_tag_std_kmeans_clustering(df_true_false, "Gear Clustering - True/False")
 
 if __name__ == "__main__":
     main()
